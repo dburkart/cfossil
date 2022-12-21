@@ -35,9 +35,12 @@ typedef struct fossil_request
 typedef struct fossil_response
 {
     enum {
-        FOSSIL_RESP_VERSION
+        FOSSIL_RESP_UNKNOWN,
+        FOSSIL_RESP_ERR,
+        FOSSIL_RESP_VERSION,
     } type;
     uint32_t code;
+    char *explanation;
 } fossil_response_t;
 
 typedef struct fossil_version_request
@@ -45,6 +48,12 @@ typedef struct fossil_version_request
     fossil_request_t base;
     char *version;
 } fossil_version_request_t;
+
+typedef struct fossil_version_response
+{
+    fossil_response_t base;
+    char *version;
+} fossil_version_response_t;
 
 fossil_message_t fossil_request_marshal(fossil_request_t *req)
 {
@@ -65,6 +74,31 @@ fossil_message_t fossil_request_marshal(fossil_request_t *req)
     }
 
     return message;
+}
+
+fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
+{
+    if (strcmp(message->command, "VERSION") == 0)
+    {
+        fossil_version_response_t *version_response = malloc(sizeof(fossil_version_response_t));
+        version_response->base.type = FOSSIL_RESP_VERSION;
+        version_response->base.code = *((uint32_t *)message->data);
+        version_response->version = malloc(message->len - 4);
+        strcpy(version_response->version, (char *)message->data + 4);
+        return (fossil_response_t *)version_response;
+    }
+
+    if (strcmp(message->command, "ERR") == 0)
+    {
+        fossil_response_t *err_response = malloc(sizeof(fossil_response_t));
+        err_response->type = FOSSIL_RESP_ERR;
+        err_response->code = *((uint32_t *)message->data);
+        err_response->explanation = malloc(message->len - 4);
+        strcpy(err_response->explanation, (char *)message->data + 4);
+        return err_response;
+    }
+
+    return NULL;
 }
 
 
@@ -147,22 +181,22 @@ ssize_t fossil_connect(fossil_client_t *client)
     if ((result = fossil_write_message(client, &msg_advertisement)) < 0)
         goto cleanup;
 
-    uint32_t len = 14;
-    fossil_message_t server_version;
-    len = fossil_read_message(client, &server_version);
 
-    if (strcmp(server_version.command, "ERR") == 0) {
-        uint32_t *error_code = (uint32_t *)server_version.data;
-        char *message = (char *)server_version.data + 4;
-        printf("%d %s", *error_code, message);
+    fossil_message_t response;
+    fossil_read_message(client, &response);
+    fossil_version_response_t *server_version = (fossil_version_response_t  *)fossil_response_unmarshal(&response);
+
+    if (server_version == NULL)
+        goto cleanup;
+
+    if (server_version->base.type == FOSSIL_RESP_ERR)
+    {
         result = -1;
+        printf("%d %s", server_version->base.code, server_version->base.explanation);
         goto cleanup;
     }
 
-    uint32_t *code = (uint32_t *)server_version.data;
-    char *s_version = (char *)server_version.data + 4;
-
-    printf("%d %s", *code, s_version);
+    printf("%d %s", server_version->base.code, server_version->version);
 
 cleanup:
     fossil_message_free(&msg_advertisement);
