@@ -11,19 +11,65 @@
 
 #define COMMAND_LEN 8
 
-typedef struct fossil_client {
+typedef struct fossil_client
+{
     int fd;
     int socket_fd;
     struct sockaddr_in addr;
 } fossil_client_t;
 
-typedef struct fossil_message {
+typedef struct fossil_message
+{
     char command[8];
     uint32_t len;
     void *data;
 } fossil_message_t;
 
-void fossil_message_free(fossil_message_t *message) {
+typedef struct fossil_request
+{
+    enum {
+        FOSSIL_REQ_VERSION
+    } type;
+} fossil_request_t;
+
+typedef struct fossil_response
+{
+    enum {
+        FOSSIL_RESP_VERSION
+    } type;
+    uint32_t code;
+} fossil_response_t;
+
+typedef struct fossil_version_request
+{
+    fossil_request_t base;
+    char *version;
+} fossil_version_request_t;
+
+fossil_message_t fossil_request_marshal(fossil_request_t *req)
+{
+    fossil_message_t message;
+
+    size_t len = 0;
+    fossil_version_request_t *version_req;
+
+    switch (req->type)
+    {
+        case FOSSIL_REQ_VERSION:
+            version_req = (fossil_version_request_t *)req;
+            strcpy(message.command, "VERSION");
+            len = strlen(version_req->version) + 1;
+            message.data = malloc(len);
+            strcpy(message.data, version_req->version);
+            message.len = len;
+    }
+
+    return message;
+}
+
+
+void fossil_message_free(fossil_message_t *message)
+{
     if (message->data != NULL) {
         free(message->data);
         message->data = NULL;
@@ -31,7 +77,8 @@ void fossil_message_free(fossil_message_t *message) {
     }
 }
 
-ssize_t fossil_read_message(fossil_client_t *client, fossil_message_t *message) {
+ssize_t fossil_read_message(fossil_client_t *client, fossil_message_t *message)
+{
     ssize_t result = 0;
     // First, read the length of the message, which is the first 4 bytes
     uint32_t len = 0;
@@ -52,8 +99,28 @@ ssize_t fossil_read_message(fossil_client_t *client, fossil_message_t *message) 
     return result;
 }
 
-int fossil_connect(fossil_client_t *client) {
-    int result = 0;
+ssize_t fossil_write_message(fossil_client_t *client, fossil_message_t *message)
+{
+    ssize_t result;
+    // First, write the length of the message
+    uint32_t len = COMMAND_LEN + message->len;
+    if ((result = write(client->socket_fd, &len, 4)) < 0)
+        return result;
+
+    // Now, write out the command
+    if ((result = write(client->socket_fd, message->command, 8)) < 0)
+        return result;
+
+    // Finally, write out our data
+    if ((result = write(client->socket_fd, message->data, message->len)) < 0)
+        return result;
+
+    return len;
+}
+
+ssize_t fossil_connect(fossil_client_t *client)
+{
+    ssize_t result = 0;
 
     if ((client->socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return -1;
@@ -73,13 +140,14 @@ int fossil_connect(fossil_client_t *client) {
     }
 
     // Now that we're connected, send a version advertisement
-    char version[19];
+    fossil_version_request_t advertisement = {.base.type = FOSSIL_REQ_VERSION};
+    advertisement.version = PROTOCOL_VERSION;
+
+    fossil_message_t msg_advertisement = fossil_request_marshal((fossil_request_t *)&advertisement);
+    if ((result = fossil_write_message(client, &msg_advertisement)) < 0)
+        goto cleanup;
+
     uint32_t len = 14;
-    memcpy(version, &len, 4);
-    sprintf(version + 4, "VERSION\0%s", PROTOCOL_VERSION);
-    send(client->socket_fd, version, 18, 0);
-
-
     fossil_message_t server_version;
     len = fossil_read_message(client, &server_version);
 
@@ -97,7 +165,7 @@ int fossil_connect(fossil_client_t *client) {
     printf("%d %s", *code, s_version);
 
 cleanup:
-    fossil_message_free(&server_version);
+    fossil_message_free(&msg_advertisement);
     return result;
 }
 
