@@ -53,7 +53,8 @@ typedef struct fossil_message
 typedef struct fossil_request
 {
     enum {
-        FOSSIL_REQ_VERSION
+        FOSSIL_REQ_VERSION,
+        FOSSIL_REQ_USE,
     } type;
 } fossil_request_t;
 
@@ -62,6 +63,7 @@ typedef struct fossil_response
     enum {
         FOSSIL_RESP_UNKNOWN,
         FOSSIL_RESP_ERR,
+        FOSSIL_RESP_OK,
         FOSSIL_RESP_VERSION,
     } type;
     uint32_t code;
@@ -74,6 +76,12 @@ typedef struct fossil_version_request
     char *version;
 } fossil_version_request_t;
 
+typedef struct fossil_use_request
+{
+    fossil_request_t base;
+    char *db_name;
+} fossil_use_request_t;
+
 typedef struct fossil_version_response
 {
     fossil_response_t base;
@@ -84,18 +92,30 @@ fossil_message_t fossil_request_marshal(fossil_request_t *req)
 {
     fossil_message_t message;
 
+    memset(message.command, 0, 8);
+
     size_t len = 0;
     fossil_version_request_t *version_req;
+    fossil_use_request_t *use_req;
 
     switch (req->type)
     {
         case FOSSIL_REQ_VERSION:
             version_req = (fossil_version_request_t *)req;
             strcpy(message.command, "VERSION");
-            len = strlen(version_req->version) + 1;
+            len = strlen(version_req->version);
             message.data = malloc(len);
-            strcpy(message.data, version_req->version);
+            memcpy(message.data, version_req->version, len);
             message.len = len;
+            break;
+        case FOSSIL_REQ_USE:
+            use_req = (fossil_use_request_t *)req;
+            strcpy(message.command, "USE");
+            len = strlen(use_req->db_name);
+            message.data = malloc(len);
+            memcpy(message.data, use_req->db_name, len);
+            message.len = len;
+            break;
     }
 
     return message;
@@ -121,6 +141,16 @@ fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
         err_response->explanation = malloc(message->len - 4);
         strcpy(err_response->explanation, (char *)message->data + 4);
         return err_response;
+    }
+
+    if (strcmp(message->command, "OK") == 0)
+    {
+        fossil_response_t *ok_response = malloc(sizeof(fossil_response_t));
+        ok_response->type = FOSSIL_RESP_OK;
+        ok_response->code = *((uint32_t *)message->data);
+        ok_response->explanation = malloc(message->len - 4);
+        strcpy(ok_response->explanation, (char *)message->data + 4);
+        return ok_response;
     }
 
     return NULL;
@@ -180,6 +210,9 @@ ssize_t fossil_write_message(fossil_client_t *client, fossil_message_t *message)
 ssize_t fossil_connect(fossil_client_t *client)
 {
     ssize_t result = 0;
+    fossil_message_t msg_advertisement, version_response, msg_use, msg_use_resp;
+
+    msg_advertisement.data = version_response.data = msg_use.data = msg_use_resp.data = NULL;
 
     if ((client->socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return -1;
@@ -202,14 +235,14 @@ ssize_t fossil_connect(fossil_client_t *client)
     fossil_version_request_t advertisement = {.base.type = FOSSIL_REQ_VERSION};
     advertisement.version = PROTOCOL_VERSION;
 
-    fossil_message_t msg_advertisement = fossil_request_marshal((fossil_request_t *)&advertisement);
+    msg_advertisement = fossil_request_marshal((fossil_request_t *)&advertisement);
     if ((result = fossil_write_message(client, &msg_advertisement)) < 0)
         goto cleanup;
 
 
-    fossil_message_t response;
-    fossil_read_message(client, &response);
-    fossil_version_response_t *server_version = (fossil_version_response_t  *)fossil_response_unmarshal(&response);
+    version_response;
+    fossil_read_message(client, &version_response);
+    fossil_version_response_t *server_version = (fossil_version_response_t  *)fossil_response_unmarshal(&version_response);
 
     if (server_version == NULL)
         goto cleanup;
@@ -221,10 +254,34 @@ ssize_t fossil_connect(fossil_client_t *client)
         goto cleanup;
     }
 
-    printf("%d %s", server_version->base.code, server_version->version);
+    printf("%d %s\n", server_version->base.code, server_version->version);
+
+    // Now use the default database
+    // FIXME: This should be configurable.
+    fossil_use_request_t use_req = {.base.type = FOSSIL_REQ_USE, .db_name = "default"};
+
+    msg_use = fossil_request_marshal((fossil_request_t *)&use_req);
+    if ((result = fossil_write_message(client, &msg_use)) < 0)
+        goto cleanup;
+
+    msg_use_resp;
+    fossil_read_message(client, &msg_use_resp);
+    fossil_response_t *use_resp = fossil_response_unmarshal(&msg_use_resp);
+
+    if (use_resp->type != FOSSIL_RESP_OK)
+    {
+        result = -1;
+        printf("%d %s\n", use_resp->code, use_resp->explanation);
+        goto cleanup;
+    }
+
+    printf("%d %s\n", use_resp->code, use_resp->explanation);
 
 cleanup:
     fossil_message_free(&msg_advertisement);
+    fossil_message_free(&version_response);
+    fossil_message_free(&msg_use);
+    fossil_message_free(&msg_use_resp);
     return result;
 }
 
