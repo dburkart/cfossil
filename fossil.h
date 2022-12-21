@@ -207,14 +207,31 @@ ssize_t fossil_write_message(fossil_client_t *client, fossil_message_t *message)
     return len;
 }
 
+fossil_response_t *fossil_send(fossil_client_t *client, fossil_request_t *request)
+{
+    fossil_response_t *response;
+    fossil_message_t message, server_response = { .data = NULL};
+
+    message = fossil_request_marshal(request);
+    if (fossil_write_message(client, &message) < 0)
+        return NULL;
+
+    fossil_read_message(client, &server_response);
+    response = fossil_response_unmarshal(&server_response);
+
+    cleanup:
+    fossil_message_free(&message);
+    fossil_message_free(&server_response);
+
+    return response;
+}
+
 ssize_t fossil_connect(fossil_client_t *client)
 {
     ssize_t result = 0;
-    fossil_message_t msg_advertisement, version_response, msg_use, msg_use_resp;
 
-    msg_advertisement.data = version_response.data = msg_use.data = msg_use_resp.data = NULL;
-
-    if ((client->socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+    if ((client->socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
         return -1;
     }
 
@@ -223,11 +240,13 @@ ssize_t fossil_connect(fossil_client_t *client)
     client->addr.sin_port = htons(8001);
 
     // FIXME: Generalize IP address
-    if (inet_pton(AF_INET, "127.0.0.1", &client->addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, "127.0.0.1", &client->addr.sin_addr) <= 0)
+    {
         return -1;
     }
 
-    if ((client->fd = connect(client->socket_fd, (struct sockaddr*)&client->addr, sizeof(client->addr))) < 0) {
+    if ((client->fd = connect(client->socket_fd, (struct sockaddr*)&client->addr, sizeof(client->addr))) < 0)
+    {
         return -1;
     }
 
@@ -235,14 +254,7 @@ ssize_t fossil_connect(fossil_client_t *client)
     fossil_version_request_t advertisement = {.base.type = FOSSIL_REQ_VERSION};
     advertisement.version = PROTOCOL_VERSION;
 
-    msg_advertisement = fossil_request_marshal((fossil_request_t *)&advertisement);
-    if ((result = fossil_write_message(client, &msg_advertisement)) < 0)
-        goto cleanup;
-
-
-    version_response;
-    fossil_read_message(client, &version_response);
-    fossil_version_response_t *server_version = (fossil_version_response_t  *)fossil_response_unmarshal(&version_response);
+    fossil_version_response_t *server_version = (fossil_version_response_t *)fossil_send(client,(fossil_request_t *) &advertisement);
 
     if (server_version == NULL)
         goto cleanup;
@@ -259,14 +271,7 @@ ssize_t fossil_connect(fossil_client_t *client)
     // Now use the default database
     // FIXME: This should be configurable.
     fossil_use_request_t use_req = {.base.type = FOSSIL_REQ_USE, .db_name = "default"};
-
-    msg_use = fossil_request_marshal((fossil_request_t *)&use_req);
-    if ((result = fossil_write_message(client, &msg_use)) < 0)
-        goto cleanup;
-
-    msg_use_resp;
-    fossil_read_message(client, &msg_use_resp);
-    fossil_response_t *use_resp = fossil_response_unmarshal(&msg_use_resp);
+    fossil_response_t *use_resp = fossil_send(client, (fossil_request_t *)&use_req);
 
     if (use_resp->type != FOSSIL_RESP_OK)
     {
@@ -278,10 +283,6 @@ ssize_t fossil_connect(fossil_client_t *client)
     printf("%d %s\n", use_resp->code, use_resp->explanation);
 
 cleanup:
-    fossil_message_free(&msg_advertisement);
-    fossil_message_free(&version_response);
-    fossil_message_free(&msg_use);
-    fossil_message_free(&msg_use_resp);
     return result;
 }
 
