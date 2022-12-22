@@ -55,6 +55,7 @@ typedef struct fossil_request
     enum {
         FOSSIL_REQ_VERSION,
         FOSSIL_REQ_USE,
+        FOSSIL_REQ_APPEND,
     } type;
 } fossil_request_t;
 
@@ -82,6 +83,13 @@ typedef struct fossil_use_request
     char *db_name;
 } fossil_use_request_t;
 
+typedef struct fossil_append_request
+{
+    fossil_request_t base;
+    char *topic;
+    char *data;
+} fossil_append_request_t;
+
 typedef struct fossil_version_response
 {
     fossil_response_t base;
@@ -95,8 +103,10 @@ fossil_message_t fossil_request_marshal(fossil_request_t *req)
     memset(message.command, 0, 8);
 
     size_t len = 0;
+    uint32_t field_len = 0;
     fossil_version_request_t *version_req;
     fossil_use_request_t *use_req;
+    fossil_append_request_t *append_req;
 
     switch (req->type)
     {
@@ -116,6 +126,18 @@ fossil_message_t fossil_request_marshal(fossil_request_t *req)
             memcpy(message.data, use_req->db_name, len);
             message.len = len;
             break;
+        case FOSSIL_REQ_APPEND:
+            append_req = (fossil_append_request_t *)req;
+            strcpy(message.command, "APPEND");
+            len = strlen(append_req->topic) + strlen(append_req->data) + 4;
+            field_len = strlen(append_req->topic);
+            message.data = malloc(len);
+            memcpy(message.data, &field_len, 4);
+            memcpy(message.data + 4, append_req->topic, field_len);
+            memcpy(message.data + 4 + field_len, append_req->data, strlen(append_req->data));
+            message.len = len;
+            break;
+
     }
 
     return message;
@@ -226,6 +248,12 @@ fossil_response_t *fossil_send(fossil_client_t *client, fossil_request_t *reques
     return response;
 }
 
+fossil_response_t *fossil_append(fossil_client_t *client, const char *topic, const char *data)
+{
+    fossil_append_request_t request = { .base.type = FOSSIL_REQ_APPEND, .topic = topic, .data = data};
+    return fossil_send(client, (fossil_request_t *)&request);
+}
+
 ssize_t fossil_connect(fossil_client_t *client)
 {
     ssize_t result = 0;
@@ -262,11 +290,8 @@ ssize_t fossil_connect(fossil_client_t *client)
     if (server_version->base.type == FOSSIL_RESP_ERR)
     {
         result = -1;
-        printf("%d %s", server_version->base.code, server_version->base.explanation);
         goto cleanup;
     }
-
-    printf("%d %s\n", server_version->base.code, server_version->version);
 
     // Now use the default database
     // FIXME: This should be configurable.
@@ -276,11 +301,8 @@ ssize_t fossil_connect(fossil_client_t *client)
     if (use_resp->type != FOSSIL_RESP_OK)
     {
         result = -1;
-        printf("%d %s\n", use_resp->code, use_resp->explanation);
         goto cleanup;
     }
-
-    printf("%d %s\n", use_resp->code, use_resp->explanation);
 
 cleanup:
     return result;
