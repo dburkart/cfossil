@@ -87,6 +87,7 @@ typedef struct fossil_append_request
 {
     fossil_request_t base;
     char *topic;
+    uint32_t len;
     char *data;
 } fossil_append_request_t;
 
@@ -134,7 +135,7 @@ fossil_message_t fossil_request_marshal(fossil_request_t *req)
             message.data = malloc(len);
             memcpy(message.data, &field_len, 4);
             memcpy(message.data + 4, append_req->topic, field_len);
-            memcpy(message.data + 4 + field_len, append_req->data, strlen(append_req->data));
+            memcpy(message.data + 4 + field_len, append_req->data, append_req->len);
             message.len = len;
             break;
 
@@ -248,9 +249,9 @@ fossil_response_t *fossil_send(fossil_client_t *client, fossil_request_t *reques
     return response;
 }
 
-fossil_response_t *fossil_append(fossil_client_t *client, const char *topic, const char *data)
+fossil_response_t *fossil_append(fossil_client_t *client, const char *topic, const char *data, uint32_t len)
 {
-    fossil_append_request_t request = { .base.type = FOSSIL_REQ_APPEND, .topic = topic, .data = data};
+    fossil_append_request_t request = { .base.type = FOSSIL_REQ_APPEND, .topic = topic, .data = data, .len = len};
     return fossil_send(client, (fossil_request_t *)&request);
 }
 

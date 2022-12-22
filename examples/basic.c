@@ -9,7 +9,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    fossil_response_t *response = fossil_append(&client, "/", "Sent Some Data From C!");
+    const char *data = "Sent Some Data From C!";
+    fossil_response_t *response = fossil_append(&client, "/", data, strlen(data));
     if (response->type != FOSSIL_RESP_OK) {
         printf("%d %s", response->code, response->explanation);
     }
