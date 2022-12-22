@@ -198,7 +198,10 @@ fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
         return ok_response;
     }
 
-    return NULL;
+    // If we get here it's probably a response that's not been implemented yet.
+    fossil_response_t *unknown_response = malloc(sizeof(fossil_response_t));
+    unknown_response->type = FOSSIL_RESP_UNKNOWN;
+    return unknown_response;
 }
 
 
