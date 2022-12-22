@@ -86,9 +86,9 @@ typedef struct fossil_use_request
 typedef struct fossil_append_request
 {
     fossil_request_t base;
-    char *topic;
     uint32_t len;
-    char *data;
+    const char *topic;
+    const char *data;
 } fossil_append_request_t;
 
 typedef struct fossil_version_response
@@ -103,7 +103,7 @@ fossil_message_t fossil_request_marshal(fossil_request_t *req)
 
     memset(message.command, 0, 8);
 
-    size_t len = 0;
+    size_t len;
     uint32_t field_len = 0;
     fossil_version_request_t *version_req;
     fossil_use_request_t *use_req;
@@ -191,7 +191,7 @@ void fossil_message_free(fossil_message_t *message)
 
 ssize_t fossil_read_message(fossil_client_t *client, fossil_message_t *message)
 {
-    ssize_t result = 0;
+    ssize_t result;
     // First, read the length of the message, which is the first 4 bytes
     uint32_t len = 0;
     if ((result = read(client->socket_fd, &len, 4)) <= 0)
@@ -232,17 +232,18 @@ ssize_t fossil_write_message(fossil_client_t *client, fossil_message_t *message)
 
 fossil_response_t *fossil_send(fossil_client_t *client, fossil_request_t *request)
 {
-    fossil_response_t *response;
+    fossil_response_t *response = NULL;
     fossil_message_t message, server_response = { .data = NULL};
 
     message = fossil_request_marshal(request);
     if (fossil_write_message(client, &message) < 0)
-        return NULL;
+        goto cleanup;
+
 
     fossil_read_message(client, &server_response);
     response = fossil_response_unmarshal(&server_response);
 
-    cleanup:
+cleanup:
     fossil_message_free(&message);
     fossil_message_free(&server_response);
 
