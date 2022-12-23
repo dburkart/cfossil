@@ -119,7 +119,7 @@ fossil_message_t fossil_request_marshal(fossil_request_t *req)
     memset(message.command, 0, 8);
 
     size_t len;
-    uint32_t field_len = 0;
+    uint32_t field_len = 0, net_field_len = 0;
     fossil_request_version_t *version_req;
     fossil_request_use_t *use_req;
     fossil_request_append_t *append_req;
@@ -147,8 +147,9 @@ fossil_message_t fossil_request_marshal(fossil_request_t *req)
             strcpy(message.command, "APPEND");
             len = strlen(append_req->topic) + strlen(append_req->data) + 4;
             field_len = strlen(append_req->topic);
+            net_field_len = htonl(field_len);
             message.data = malloc(len);
-            memcpy(message.data, &field_len, 4);
+            memcpy(message.data, &net_field_len, 4);
             memcpy(message.data + 4, append_req->topic, field_len);
             memcpy(message.data + 4 + field_len, append_req->data, append_req->len);
             message.len = len;
@@ -172,7 +173,7 @@ fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
     {
         fossil_response_version_t *version_response = malloc(sizeof(fossil_response_version_t));
         version_response->base.type = FOSSIL_RESP_VERSION;
-        version_response->base.code = *((uint32_t *)message->data);
+        version_response->base.code = ntohl(*((uint32_t *)message->data));
         version_response->version = malloc(message->len - 4);
         strcpy(version_response->version, (char *)message->data + 4);
         return (fossil_response_t *)version_response;
@@ -182,7 +183,7 @@ fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
     {
         fossil_response_t *err_response = malloc(sizeof(fossil_response_t));
         err_response->type = FOSSIL_RESP_ERR;
-        err_response->code = *((uint32_t *)message->data);
+        err_response->code = ntohl(*((uint32_t *)message->data));
         err_response->explanation = malloc(message->len - 4);
         strcpy(err_response->explanation, (char *)message->data + 4);
         return err_response;
@@ -192,7 +193,7 @@ fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
     {
         fossil_response_t *ok_response = malloc(sizeof(fossil_response_t));
         ok_response->type = FOSSIL_RESP_OK;
-        ok_response->code = *((uint32_t *)message->data);
+        ok_response->code = ntohl(*((uint32_t *)message->data));
         ok_response->explanation = malloc(message->len - 4);
         strcpy(ok_response->explanation, (char *)message->data + 4);
         return ok_response;
@@ -236,6 +237,8 @@ ssize_t fossil_message_read(fossil_client_t *client, fossil_message_t *message)
     if ((result = read(client->socket_fd, &len, 4)) <= 0)
         return result;
 
+    len = ntohl(len);
+
     // If our overall length is less than the command length, we have a problem
     if (len < COMMAND_LEN)
         return -1;
@@ -264,7 +267,8 @@ ssize_t fossil_message_write(fossil_client_t *client, fossil_message_t *message)
     ssize_t result;
     // First, write the length of the message
     uint32_t len = COMMAND_LEN + message->len;
-    if ((result = write(client->socket_fd, &len, 4)) < 0)
+    uint32_t network_len = htonl(len);
+    if ((result = write(client->socket_fd, &network_len, 4)) < 0)
         return result;
 
     // Now, write out the command
