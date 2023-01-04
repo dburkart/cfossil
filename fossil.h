@@ -175,8 +175,8 @@ fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
         fossil_response_version_t *version_response = malloc(sizeof(fossil_response_version_t));
         version_response->base.type = FOSSIL_RESP_VERSION;
         version_response->base.code = ntohl(*((uint32_t *)message->data));
-        version_response->version = malloc(message->len - 4);
-        strcpy(version_response->version, (char *)message->data + 4);
+        version_response->version = calloc(message->len - 3, 1);
+        memcpy(version_response->version, (char *)message->data + 4, message->len - 4);
         return (fossil_response_t *)version_response;
     }
 
@@ -185,8 +185,8 @@ fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
         fossil_response_t *err_response = malloc(sizeof(fossil_response_t));
         err_response->type = FOSSIL_RESP_ERR;
         err_response->code = ntohl(*((uint32_t *)message->data));
-        err_response->explanation = malloc(message->len - 4);
-        strcpy(err_response->explanation, (char *)message->data + 4);
+        err_response->explanation = calloc(message->len - 3, 1);
+        memcpy(err_response->explanation, (char *)message->data + 4, message->len - 4);
         return err_response;
     }
 
@@ -195,8 +195,8 @@ fossil_response_t *fossil_response_unmarshal(fossil_message_t *message)
         fossil_response_t *ok_response = malloc(sizeof(fossil_response_t));
         ok_response->type = FOSSIL_RESP_OK;
         ok_response->code = ntohl(*((uint32_t *)message->data));
-        ok_response->explanation = malloc(message->len - 4);
-        strcpy(ok_response->explanation, (char *)message->data + 4);
+        ok_response->explanation = calloc(message->len - 3, 1);
+        memcpy(ok_response->explanation, (char *)message->data + 4, message->len - 4);
         return ok_response;
     }
 
@@ -303,7 +303,7 @@ fossil_response_t *fossil_send(fossil_client_t *client, fossil_request_t *reques
     fossil_message_read(client, &server_response);
     response = fossil_response_unmarshal(&server_response);
 
-cleanup:
+    cleanup:
     fossil_message_free(&message);
     fossil_message_free(&server_response);
 
@@ -348,7 +348,6 @@ ssize_t fossil_connect(fossil_client_t *client, char *hostname, int port, char *
 
     if ((host_entry = gethostbyname(hostname)) == NULL)
     {
-        herror("gethostbyname");
         return -1;
     }
 
@@ -395,7 +394,7 @@ ssize_t fossil_connect(fossil_client_t *client, char *hostname, int port, char *
         goto cleanup;
     }
 
-cleanup:
+    cleanup:
     return result;
 }
 
