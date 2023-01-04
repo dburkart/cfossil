@@ -31,6 +31,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <malloc.h>
+#include <netdb.h>
 
 #define PROTOCOL_VERSION "v1.0.0"
 
@@ -330,7 +331,7 @@ fossil_response_t *fossil_append(fossil_client_t *client, const char *topic, con
  * @param client Address of an empty client to fill in
  * @return -1 if an error occurred
  */
-ssize_t fossil_connect(fossil_client_t *client)
+ssize_t fossil_connect(fossil_client_t *client, char *hostname, int port, char *database)
 {
     ssize_t result = 0;
 
@@ -340,11 +341,26 @@ ssize_t fossil_connect(fossil_client_t *client)
     }
 
     client->addr.sin_family = AF_INET;
-    // FIXME: Generalize port
-    client->addr.sin_port = htons(8001);
+    client->addr.sin_port = htons(port);
 
-    // FIXME: Generalize IP address
-    if (inet_pton(AF_INET, "127.0.0.1", &client->addr.sin_addr) <= 0)
+    struct hostent *host_entry;
+    struct in_addr **address_list;
+
+    if ((host_entry = gethostbyname(hostname)) == NULL)
+    {
+        herror("gethostbyname");
+        return -1;
+    }
+
+    address_list = (struct in_addr **) host_entry->h_addr_list;
+
+    char ip[32] = {};
+    if (address_list[0] == NULL)
+        return -1;
+
+    strcpy(ip, inet_ntoa(*address_list[0]));
+
+    if (inet_pton(AF_INET, ip, &client->addr.sin_addr) <= 0)
     {
         return -1;
     }
@@ -370,8 +386,7 @@ ssize_t fossil_connect(fossil_client_t *client)
     }
 
     // Now use the default database
-    // FIXME: This should be configurable.
-    fossil_request_use_t use_req = {.base.type = FOSSIL_REQ_USE, .db_name = "default"};
+    fossil_request_use_t use_req = {.base.type = FOSSIL_REQ_USE, .db_name = database};
     fossil_response_t *use_resp = fossil_send(client, (fossil_request_t *)&use_req);
 
     if (use_resp->type != FOSSIL_RESP_OK)

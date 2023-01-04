@@ -4,7 +4,7 @@
 int main(int argc, char **argv) {
     fossil_client_t client;
 
-    int result = fossil_connect(&client);
+    int result = fossil_connect(&client, "localhost", 8001, "default");
     if (result < 0) {
         return 1;
     }
